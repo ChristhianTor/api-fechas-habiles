@@ -2,6 +2,19 @@
 
 API REST que calcula fechas hábiles en Colombia, considerando días festivos, horarios laborales y zona horaria local.
 
+**API desplegada:** 
+https://api-fechas-habiles-production.up.railway.app
+
+**Endpoint principal:**
+GET https://api-fechas-habiles-production.up.railway.app/calculate-working-date
+
+### Prueba rápida
+
+Haz click aquí para probar:
+- [Sumar 1 día hábil](https://api-fechas-habiles-production.up.railway.app/calculate-working-date?days=1)
+- [Sumar 5 horas hábiles](https://api-fechas-habiles-production.up.railway.app/calculate-working-date?hours=5)
+- [Sumar 2 días y 3 horas](https://api-fechas-habiles-production.up.railway.app/calculate-working-date?days=2&hours=3)
+
 ## 🚀 Características
 
 - Suma días hábiles (lunes a viernes, excluyendo festivos)
