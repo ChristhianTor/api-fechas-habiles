@@ -1,16 +1,12 @@
 // src/services/workingDays.ts
 
-import { addDays, addHours, addMinutes, getHours, getMinutes, setHours, setMinutes, setSeconds, setMilliseconds } from 'date-fns';
+import { addDays, addMinutes, setHours, setMinutes, setSeconds, setMilliseconds } from 'date-fns';
 import { 
   adjustToWorkingTime, 
-  getNextWorkingDay, 
-  isWorkingDay, 
-  isWorkingHour,
-  WORK_START_HOUR,
+  isWorkingDay,
   WORK_END_HOUR,
   LUNCH_START_HOUR,
-  LUNCH_END_HOUR,
-  WORK_HOURS_PER_DAY
+  LUNCH_END_HOUR
 } from '../utils/dateUtils';
 
 /**
@@ -24,17 +20,34 @@ export async function addWorkingDays(startDate: Date, daysToAdd: number): Promis
     return startDate;
   }
   
-  // Primero ajustar la fecha al momento laboral válido
+  // Ajustar al momento laboral válido
   let currentDate = await adjustToWorkingTime(startDate);
   
-  // Sumar días hábiles uno por uno
+  // Guardar la hora ajustada para mantenerla
+  const targetHour = currentDate.getHours();
+  const targetMinute = currentDate.getMinutes();
+  const targetSecond = currentDate.getSeconds();
+  const targetMs = currentDate.getMilliseconds();
+  
   let daysAdded = 0;
   
   while (daysAdded < daysToAdd) {
-    // Obtener el siguiente día laboral
-    currentDate = await getNextWorkingDay(currentDate);
+    // Avanzar al siguiente día
+    currentDate = addDays(currentDate, 1);
+    
+    // Verificar si es día laboral
+    while (!(await isWorkingDay(currentDate))) {
+      currentDate = addDays(currentDate, 1);
+    }
+    
     daysAdded++;
   }
+  
+  // Restaurar la hora original (ajustada)
+  currentDate = setHours(currentDate, targetHour);
+  currentDate = setMinutes(currentDate, targetMinute);
+  currentDate = setSeconds(currentDate, targetSecond);
+  currentDate = setMilliseconds(currentDate, targetMs);
   
   return currentDate;
 }
@@ -50,127 +63,60 @@ export async function addWorkingHours(startDate: Date, hoursToAdd: number): Prom
     return startDate;
   }
   
-  // Primero ajustar la fecha al momento laboral válido
+  // Ajustar al momento laboral válido
   let currentDate = await adjustToWorkingTime(startDate);
   
-  let remainingHours = hoursToAdd;
-  
-  while (remainingHours > 0) {
-    // Calcular cuántas horas quedan en el día actual
-    const hoursLeftInDay = await getWorkingHoursLeftInDay(currentDate);
-    
-    if (remainingHours <= hoursLeftInDay) {
-      // Podemos sumar todas las horas restantes en el día actual
-      currentDate = await addHoursWithinDay(currentDate, remainingHours);
-      remainingHours = 0;
-    } else {
-      // Necesitamos pasar al siguiente día
-      remainingHours -= hoursLeftInDay;
-      
-      // Ir al siguiente día laboral a las 8:00 AM
-      currentDate = await getNextWorkingDay(currentDate);
-    }
-  }
-  
-  return currentDate;
-}
-
-/**
- * Calcula cuántas horas laborales quedan en el día actual
- * desde la hora actual hasta el fin de la jornada (5 PM)
- */
-async function getWorkingHoursLeftInDay(date: Date): Promise<number> {
-  const hour = date.getHours();
-  const minute = date.getMinutes();
-  const second = date.getSeconds();
-  
-  // Convertir todo a minutos desde el inicio del día
-  const currentMinutes = hour * 60 + minute + second / 60;
-  
-  // Fin de jornada: 17:00 (5 PM) = 1020 minutos
-  const endOfDayMinutes = WORK_END_HOUR * 60;
-  
-  // Calcular minutos hasta el fin del día
-  let minutesLeft = endOfDayMinutes - currentMinutes;
-  
-  // Si estamos antes del almuerzo o durante el almuerzo, restar la hora de almuerzo
-  if (hour < LUNCH_END_HOUR) {
-    // Restar 1 hora (60 minutos) de almuerzo
-    minutesLeft -= 60;
-  }
-  
-  // Convertir minutos a horas
-  const hoursLeft = minutesLeft / 60;
-  
-  return Math.max(0, hoursLeft);
-}
-
-/**
- * Suma horas dentro del mismo día, saltando el horario de almuerzo
- */
-async function addHoursWithinDay(date: Date, hours: number): Promise<Date> {
-  let currentDate = new Date(date);
-  let remainingMinutes = hours * 60; // Convertir a minutos para mayor precisión
+  let remainingMinutes = hoursToAdd * 60; // Trabajar en minutos para mayor precisión
   
   while (remainingMinutes > 0) {
     const currentHour = currentDate.getHours();
     const currentMinute = currentDate.getMinutes();
     
-    // Si estamos justo antes del almuerzo (entre 11:XX y 12:00)
-    if (currentHour === 11) {
-      // Calcular minutos hasta las 12:00 PM
-      const minutesUntilLunch = 60 - currentMinute;
-      
-      if (remainingMinutes <= minutesUntilLunch) {
-        // Podemos sumar sin llegar al almuerzo
-        currentDate = addMinutes(currentDate, remainingMinutes);
-        remainingMinutes = 0;
-      } else {
-        // Llegamos al almuerzo, saltar a la 1:00 PM
-        remainingMinutes -= minutesUntilLunch;
-        currentDate = setHours(currentDate, LUNCH_END_HOUR);
-        currentDate = setMinutes(currentDate, 0);
-        currentDate = setSeconds(currentDate, 0);
-        currentDate = setMilliseconds(currentDate, 0);
-      }
-    }
-    // Si estamos durante el almuerzo (12:00 - 12:59)
-    else if (currentHour === LUNCH_START_HOUR) {
-      // Saltar a la 1:00 PM
+    // Calcular minutos hasta el final del periodo actual
+    let minutesUntilBreak: number;
+    
+    if (currentHour < LUNCH_START_HOUR) {
+      // Estamos en la mañana (8 AM - 12 PM)
+      minutesUntilBreak = (LUNCH_START_HOUR - currentHour) * 60 - currentMinute;
+    } else if (currentHour === LUNCH_START_HOUR) {
+      // Estamos en almuerzo, saltar a 1 PM
       currentDate = setHours(currentDate, LUNCH_END_HOUR);
       currentDate = setMinutes(currentDate, 0);
       currentDate = setSeconds(currentDate, 0);
       currentDate = setMilliseconds(currentDate, 0);
+      continue;
+    } else {
+      // Estamos en la tarde (1 PM - 5 PM)
+      minutesUntilBreak = (WORK_END_HOUR - currentHour) * 60 - currentMinute;
     }
-    // Horario normal
-    else {
-      // Calcular minutos hasta el fin del día o hasta el almuerzo
-      let minutesUntilBreak;
+    
+    if (remainingMinutes <= minutesUntilBreak) {
+      // Podemos sumar todo en este periodo
+      currentDate = addMinutes(currentDate, remainingMinutes);
+      remainingMinutes = 0;
+    } else {
+      // No cabe todo, avanzamos al siguiente periodo
+      currentDate = addMinutes(currentDate, minutesUntilBreak);
+      remainingMinutes -= minutesUntilBreak;
       
-      if (currentHour < LUNCH_START_HOUR) {
-        // Estamos antes del almuerzo
-        minutesUntilBreak = (LUNCH_START_HOUR - currentHour) * 60 - currentMinute;
-      } else {
-        // Estamos después del almuerzo
-        minutesUntilBreak = (WORK_END_HOUR - currentHour) * 60 - currentMinute;
-      }
+      const hour = currentDate.getHours();
       
-      if (remainingMinutes <= minutesUntilBreak) {
-        // Podemos sumar todo sin interrupciones
-        currentDate = addMinutes(currentDate, remainingMinutes);
-        remainingMinutes = 0;
-      } else {
-        // Llegaríamos al límite
-        currentDate = addMinutes(currentDate, minutesUntilBreak);
-        remainingMinutes -= minutesUntilBreak;
+      if (hour === LUNCH_START_HOUR) {
+        // Llegamos al almuerzo, saltar a 1 PM
+        currentDate = setHours(currentDate, LUNCH_END_HOUR);
+        currentDate = setMinutes(currentDate, 0);
+        currentDate = setSeconds(currentDate, 0);
+        currentDate = setMilliseconds(currentDate, 0);
+      } else if (hour >= WORK_END_HOUR) {
+        // Llegamos al final del día, ir al siguiente día laboral
+        do {
+          currentDate = addDays(currentDate, 1);
+        } while (!(await isWorkingDay(currentDate)));
         
-        // Si llegamos al almuerzo, saltar a la 1 PM
-        if (currentDate.getHours() === LUNCH_START_HOUR) {
-          currentDate = setHours(currentDate, LUNCH_END_HOUR);
-          currentDate = setMinutes(currentDate, 0);
-          currentDate = setSeconds(currentDate, 0);
-          currentDate = setMilliseconds(currentDate, 0);
-        }
+        currentDate = setHours(currentDate, 8); // 8 AM
+        currentDate = setMinutes(currentDate, 0);
+        currentDate = setSeconds(currentDate, 0);
+        currentDate = setMilliseconds(currentDate, 0);
       }
     }
   }
